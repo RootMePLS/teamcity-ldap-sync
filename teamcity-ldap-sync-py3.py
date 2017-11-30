@@ -1,5 +1,6 @@
-import ldap
-
+import ldap3
+from ldap3 import Server, Connection, AUTO_BIND_NO_TLS, SUBTREE, ALL_ATTRIBUTES, ALL
+from urllib.parse import urlparse
 import requests
 import docopt
 import json
@@ -15,7 +16,8 @@ class LDAPConn(object):
     """
 
     def __init__(self, uri, base, user, passwd):
-        self.uri = uri
+        #self.uri = uri
+        self.uri = urlparse(uri)
         self.base = base
         self.ldap_user = user
         self.ldap_pass = passwd
@@ -28,13 +30,24 @@ class LDAPConn(object):
             SystemExit
 
         """
-        self.conn = ldap.initialize(self.uri)
-        self.conn.set_option(ldap.OPT_REFERRALS, ldap.OPT_OFF)
 
-        try:
-            self.conn.simple_bind_s(self.ldap_user, self.ldap_pass)
-        except ldap.SERVER_DOWN as e:
-            raise SystemExit('Cannot connect to LDAP server: %s' % e)
+        # self.conn = ldap.initialize(self.uri)
+        # self.conn.set_option(ldap.OPT_REFERRALS, ldap.OPT_OFF)
+        server = Server(host=self.uri.hostname,
+                        port=self.uri.port,
+                        get_info=ALL)
+        self.conn = Connection(server=server,
+                               user=self.ldap_user,
+                               password=self.ldap_pass,
+                               check_names=True,
+                               raise_exceptions=True)
+
+        self.conn.bind()
+
+        # try:
+        #     self.conn.simple_bind_s(self.ldap_user, self.ldap_pass)
+        # except ldap.SERVER_DOWN as e:
+        #     raise SystemExit('Cannot connect to LDAP server: %s' % e)
 
     def disconnect(self):
         """
@@ -64,11 +77,15 @@ class LDAPConn(object):
         attrlist = [group_member_attribute]
         filter = group_filter % group
 
-        result = self.conn.search_s(base=self.base,
-                                    scope=ldap.SCOPE_SUBTREE,
-                                    filterstr=filter,
-                                    attrlist=attrlist)
+        # result = self.conn.search_s(base=self.base,
+        #                             scope=ldap.SCOPE_SUBTREE,
+        #                             filterstr=filter,
+        #                             attrlist=attrlist)
 
+        result = self.conn.search(search_base=self.base,
+                                  search_scope=SUBTREE,
+                                  search_filter=filter,
+                                  attributes=attrlist)
         if not result:
             print('>>> Unable to find group %s, skipping group' % group)
             return None
@@ -168,17 +185,18 @@ class LDAPConn(object):
         filter = group_filter % groups_wildcard
         result_groups = []
 
-        result = self.conn.search_s(base=self.base,
-                                    scope=ldap.SCOPE_SUBTREE,
-                                    filterstr=filter, )
+        result = self.conn.search(search_base=self.base,
+                                  search_scope=SUBTREE,
+                                  search_filter=filter)
 
-        for group in result:
-            # Skip refldap (when Active Directory used)
-            # [0]==None
-            if group[0]:
-                group_name = group[1]['name'][0]
-                print("Find group %s" % group_name)
-                result_groups.append(group_name)
+        if result:
+            for group in result:
+                # Skip refldap (when Active Directory used)
+                # [0]==None
+                if group[0]:
+                    group_name = group[1]['name'][0]
+                    print("Find group %s" % group_name)
+                    result_groups.append(group_name)
 
         if not result_groups:
             print('>>> Unable to find group %s, skipping group wildcard' % groups_wildcard)
