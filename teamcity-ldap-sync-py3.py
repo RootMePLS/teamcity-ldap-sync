@@ -2,9 +2,40 @@ import ldap3
 from ldap3 import Server, Connection, AUTO_BIND_NO_TLS, SUBTREE, ALL_ATTRIBUTES, ALL
 from urllib.parse import urlparse
 import requests
-import docopt
 import json
 import configparser
+import argparse
+
+
+
+def get_args():
+    """Get command line args from the user"""
+    parser = argparse.ArgumentParser(description="Standard Arguments")
+
+    parser.add_argument("-f", "--file",
+                        required=True,
+                        help="Configuration file to use")
+
+    parser.add_argument("-w", "--wildcard-search",
+                        required=False,
+                        action='store_true',
+                        help="Search AD group with wildcard (e.g. R.*.Teamcity.*) - TESTED ONLY with Active Directory")
+
+    parser.add_argument("-r", "--recursive",
+                        required=False,
+                        help='Resolves AD group members recursively (i.e. nested groups)')
+
+    parser.add_argument("-l", "--lowercase",
+                        required=False,
+                        help="Create AD user names as lowercase")
+
+    parser.add_argument("-s", "--skip-disabled",
+                        required=False,
+                        help="Skip disabled AD users")
+
+    args = parser.parse_args()
+
+    return args
 
 
 class LDAPConn(object):
@@ -187,16 +218,14 @@ class LDAPConn(object):
 
         result = self.conn.search(search_base=self.base,
                                   search_scope=SUBTREE,
-                                  search_filter=filter)
+                                  search_filter=filter,
+                                  attributes='cn')
 
         if result:
+            result = json.loads(self.conn.response_to_json())['entries']
             for group in result:
-                # Skip refldap (when Active Directory used)
-                # [0]==None
-                if group[0]:
-                    group_name = group[1]['name'][0]
-                    print("Find group %s" % group_name)
-                    result_groups.append(group_name)
+                group_name = group['attributes'].get('cn')
+                result_groups.append(group_name)
 
         if not result_groups:
             print('>>> Unable to find group %s, skipping group wildcard' % groups_wildcard)
@@ -409,14 +438,12 @@ class TeamCityLDAPConf(object):
         except configparser.NoOptionError as e:
             raise SystemExit('Configuration issues detected in %s' % self.config)
 
-    def set_groups_with_wildcard(self):
+    def set_groups_with_wildcard(self, ldap_conn):
         """
         Set group from LDAP with wildcard
         :return:
         """
         result_groups = []
-        ldap_conn = LDAPConn(self.ldap_uri, self.ldap_base, self.ldap_user, self.ldap_pass)
-        ldap_conn.connect()
 
         for group in self.ldap_groups:
             groups = ldap_conn.get_groups_with_wildcard(group)
@@ -537,24 +564,10 @@ class TeamCityClient(object):
 
 
 def main():
-    usage = """
-Usage: teamcity-ldap-sync [-lsrwdn] [--verbose] -f <config>
-       teamcity-ldap-sync -v
-       teamcity-ldap-sync -h
+    # Parse CLI arguments
+    args = get_args()
 
-Options:
-  -h, --help                    Display this usage info
-  -v, --version                 Display version and exit
-  -l, --lowercase               Create AD user names as lowercase
-  -s, --skip-disabled           Skip disabled AD users
-  -r, --recursive               Resolves AD group members recursively (i.e. nested groups)
-  -w, --wildcard-search         Search AD group with wildcard (e.g. R.*.Zabbix.*) - TESTED ONLY with Active Directory
-  -f <config>, --file <config>  Configuration file to use
-
-"""
-    args = docopt.docopt(usage, version="0.1.1")
-
-    config = TeamCityLDAPConf(args['--file'])
+    config = TeamCityLDAPConf(args.file)
     config.load_config()
 
     # set up AD differences, if necessary
@@ -571,9 +584,9 @@ Options:
     global deleteorphans
     global recursive
 
-    lowercase = args['--lowercase']
-    skipdisabled = args['--skip-disabled']
-    recursive = args['--recursive']
+    lowercase = args.lowercase
+    skipdisabled = args.skip_disabled
+    recursive = args.recursive
 
     if config.ldap_type == 'activedirectory':
         active_directory = "true"
@@ -592,13 +605,14 @@ Options:
         group_member_attribute = config.openldap_groupattribute
         uid_attribute = config.openldap_userattribute
 
-    wildcard_search = args['--wildcard-search']
-
-    if wildcard_search:
-        config.set_groups_with_wildcard()
+    wildcard_search = args.wildcard_search
 
     ldap_conn = LDAPConn(config.ldap_uri, config.ldap_base, config.ldap_user, config.ldap_pass)
     ldap_conn.connect()
+
+    if wildcard_search:
+        config.set_groups_with_wildcard(ldap_conn)
+
     tc = TeamCityClient(config.tc_server, config.tc_username, config.tc_password, config.ldap_groups, ldap_conn)
     tc.start_sync()
     print("HOOOORAY Sync complete")
