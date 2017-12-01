@@ -1,11 +1,10 @@
 import ldap3
-from ldap3 import Server, Connection, AUTO_BIND_NO_TLS, SUBTREE, ALL_ATTRIBUTES, ALL
+from ldap3 import Server, Connection, AUTO_BIND_NO_TLS, SUBTREE, ALL_ATTRIBUTES, ALL, BASE
 from urllib.parse import urlparse
 import requests
 import json
 import configparser
 import argparse
-
 
 
 def get_args():
@@ -23,14 +22,17 @@ def get_args():
 
     parser.add_argument("-r", "--recursive",
                         required=False,
+                        action='store_true',
                         help='Resolves AD group members recursively (i.e. nested groups)')
 
     parser.add_argument("-l", "--lowercase",
                         required=False,
+                        action='store_true',
                         help="Create AD user names as lowercase")
 
     parser.add_argument("-s", "--skip-disabled",
                         required=False,
+                        action='store_true',
                         help="Skip disabled AD users")
 
     args = parser.parse_args()
@@ -47,7 +49,7 @@ class LDAPConn(object):
     """
 
     def __init__(self, uri, base, user, passwd):
-        #self.uri = uri
+        # self.uri = uri
         self.uri = urlparse(uri)
         self.base = base
         self.ldap_user = user
@@ -62,8 +64,6 @@ class LDAPConn(object):
 
         """
 
-        # self.conn = ldap.initialize(self.uri)
-        # self.conn.set_option(ldap.OPT_REFERRALS, ldap.OPT_OFF)
         server = Server(host=self.uri.hostname,
                         port=self.uri.port,
                         get_info=ALL)
@@ -75,24 +75,12 @@ class LDAPConn(object):
 
         self.conn.bind()
 
-        # try:
-        #     self.conn.simple_bind_s(self.ldap_user, self.ldap_pass)
-        # except ldap.SERVER_DOWN as e:
-        #     raise SystemExit('Cannot connect to LDAP server: %s' % e)
-
     def disconnect(self):
         """
         Disconnect from the LDAP server.
 
         """
         self.conn.unbind()
-
-    def remove_ad_referrals(self, result):
-        """
-        Remove referrals from AD query result
-
-        """
-        return [i for i in result if i[0] != None]
 
     def get_group_members(self, group):
         """
@@ -124,13 +112,13 @@ class LDAPConn(object):
         # Get DN for each user in the group
         if active_directory:
 
-            result = self.remove_ad_referrals(result)
-
             final_listing = {}
 
+            result = json.loads(self.conn.response_to_json())['entries']
+
             for members in result:
-                result_dn = members[0]
-                result_attrs = members[1]
+                result_dn = members.get('dn')
+                result_attrs = members.get('attributes')
 
             group_members = []
             attrlist = [uid_attribute]
@@ -146,13 +134,15 @@ class LDAPConn(object):
                 else:
                     filter = "(&%s%s)" % (user_filter, member_of_filter_dn)
 
-                uid = self.conn.search_s(base=self.base,
-                                         scope=ldap.SCOPE_SUBTREE,
-                                         filterstr=filter,
-                                         attrlist=attrlist)
+                uid = self.conn.search(search_base=self.base,
+                                       search_scope=SUBTREE,
+                                       search_filter=filter,
+                                       attributes=attrlist)
 
-                for item in self.remove_ad_referrals(uid):
-                    group_members.append(item)
+                if uid:
+                    group_members = self.conn.response_to_json()
+                    group_members = json.loads(group_members)['entries']
+
             else:
                 # Otherwise, just get a DN for each user in the group
                 for member in result_attrs[group_member_attribute]:
@@ -161,22 +151,22 @@ class LDAPConn(object):
                     else:
                         filter = "(&%s)" % user_filter
 
-                    uid = self.conn.search_s(base=member,
-                                             scope=ldap.SCOPE_BASE,
-                                             filterstr=filter,
-                                             attrlist=attrlist)
-                    for item in uid:
-                        group_members.append(item)
+                    uid = self.conn.search(search_base=member,
+                                           search_scope=SUBTREE,
+                                           search_filter=filter,
+                                           attributes=attrlist)
+
+                    if uid:
+                        group_members = self.conn.response_to_json()
+                        group_members = json.loads(group_members)['entries']
 
             # Fill dictionary with usernames and corresponding DNs
             for item in group_members:
-                dn = item[0]
-                username = item[1][uid_attribute]
+                dn = item.get('dn')
+                username = item.get('attributes').get('sAMAccountName')
 
                 if lowercase:
-                    username = str(username)[2: -2].lower()
-                else:
-                    username = str(username)[2: -2]
+                    username = username.lower()
 
                 final_listing[username] = dn
 
@@ -232,7 +222,7 @@ class LDAPConn(object):
 
         return result_groups
 
-    def get_user_media(self, dn, ldap_media):
+    def get_user_attributes(self, dn, attr_list):
         """
         Retrieves the 'media' attribute of an LDAP user
 
@@ -244,81 +234,20 @@ class LDAPConn(object):
             The user's media attribute value
 
         """
-        attrlist = [ldap_media]
 
-        result = self.conn.search_s(base=dn,
-                                    scope=ldap.SCOPE_BASE,
-                                    attrlist=attrlist)
+        filter = '(distinguishedName=%s)' % dn
 
-        if not result:
+        self.conn.search(search_base=self.base,
+                         search_filter=filter,
+                         search_scope=SUBTREE,
+                         attributes=attr_list)
+
+        if not self.conn:
             return None
 
-        dn, data = result.pop()
+        result = json.loads(self.conn.response_to_json())['entries'][0]['attributes']
 
-        mail = data.get(ldap_media)
-
-        if not mail:
-            return None
-
-        return mail.pop()
-
-    def get_user_sn(self, dn):
-        """
-        Retrieves the 'sn' attribute of an LDAP user
-
-        Args:
-            username (str): The LDAP distinguished name to lookup
-
-        Returns:
-            The user's surname attribute
-
-        """
-        attrlist = ['sn']
-
-        result = self.conn.search_s(base=dn,
-                                    scope=ldap.SCOPE_BASE,
-                                    attrlist=attrlist)
-
-        if not result:
-            return None
-
-        dn, data = result.pop()
-
-        sn = data.get('sn')
-
-        if not sn:
-            return None
-
-        return sn.pop()
-
-    def get_user_givenName(self, dn):
-        """
-        Retrieves the 'givenName' attribute of an LDAP user
-
-        Args:
-            username (str): The LDAP distinguished name to lookup
-
-        Returns:
-            The user's given name attribute
-
-        """
-        attrlist = ['givenName']
-
-        result = self.conn.search_s(base=dn,
-                                    scope=ldap.SCOPE_BASE,
-                                    attrlist=attrlist)
-
-        if not result:
-            return None
-
-        dn, data = result.pop()
-
-        name = data.get('givenName')
-
-        if not name:
-            return None
-
-        return name.pop()
+        return result
 
 
 class TeamCityLDAPConf(object):
@@ -485,13 +414,16 @@ class TeamCityClient(object):
             return "Error: Couldn't find user " + user
 
     def get_users_from_group(self, group_name):
-        key = [group['key'] for group in self.tc_groups if group['name'] == group_name][0]
-        url = self.rest_url + 'userGroups/key:' + key
-        resp = self.session.get(url, verify=False)
-        if resp.status_code != 200:
-            Exception("Error: Couldn't find group " + group_name + '\n' + resp.content)
-        users = resp.json()['users']['user']
-        return [user['username'] for user in users]
+        if self.tc_groups:
+            key = [group['key'] for group in self.tc_groups if group['name'] == group_name][0]
+            url = self.rest_url + 'userGroups/key:' + key
+            resp = self.session.get(url, verify=False)
+            if resp.status_code != 200:
+                Exception("Error: Couldn't find group " + group_name + '\n' + resp.content)
+            users = resp.json()['users']['user']
+            return [user['username'] for user in users if users]
+        else:
+            return []
 
     def add_user_to_group(self, user, group_name):
         url = self.rest_url + 'users/' + user + '/groups'
@@ -525,34 +457,41 @@ class TeamCityClient(object):
 
     def create_user(self, user):
         url = self.rest_url + 'users'
+        if user['email'] == []:
+            user['email'] = ''
         data = json.dumps({u'username': user['username'], u'name': user['name'], u'email': user['email']})
+
         self.session.post(url, verify=False, data=data)
 
     def start_sync(self):
 
         for group in self.ldap_groups:
-            print(group)
 
             # Get users from LDAP group
             ldap_group_users = self.ldap_object.get_group_members(group)
-            tc_group_users = TeamCityClient.get_users_from_group(self, group)
+
 
             # Create group if not exists
             tc_groups = [gr['name'] for gr in self.tc_groups]
             if group not in tc_groups:
                 TeamCityClient.create_group(self, group)
+                self.tc_groups = TeamCityClient.get_tc_groups(self)
 
             # Create users if they not exist
             for login, dn in ldap_group_users.items():
                 if login not in self.tc_users:
+                    attr_list = ['sn', 'givenName', 'mail']
+                    attributes = self.ldap_object.get_user_attributes(dn, attr_list)
                     user = {'username': login,
-                            'name': self.ldap_object.get_user_givenName(dn) + ' ' + self.ldap_object.get_user_sn(
-                                dn) if self.ldap_object.get_user_sn(dn) else login,
-                            'email': self.ldap_object.get_user_media(dn, 'mail')}
+                            'name': attributes['givenName'] + ' ' +
+                                    attributes['sn'] if attributes['sn'] else login,
+                            'email': attributes.get('mail', '')}
                     TeamCityClient.create_user(self, user)
 
-            # Add users to TC group
+            # Get users from TC group
+            tc_group_users = TeamCityClient.get_users_from_group(self, group)
 
+            # Add users to TC group
             for user in ldap_group_users.keys():
                 if user not in tc_group_users:
                     TeamCityClient.add_user_to_group(self, user, group)
