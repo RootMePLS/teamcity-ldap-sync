@@ -544,17 +544,16 @@ def main():
         group_member_attribute = config.openldap_groupattribute
         uid_attribute = config.openldap_userattribute
 
-    wildcard_search = args.wildcard_search
-
     ldap_conn = LDAPConn(config.ldap_uri, config.ldap_base, config.ldap_user, config.ldap_pass)
     ldap_conn.connect()
 
-    if wildcard_search:
+    if args.wildcard_search:
         config.set_groups_with_wildcard(ldap_conn)
 
     tc = TeamCityClient(config.tc_server, config.tc_username, config.tc_password, config.ldap_groups, ldap_conn)
     tc.start_sync()
     print("HOOOORAY Sync complete")
+    ldap_conn.disconnect()
 
 
 if __name__ == '__main__':
