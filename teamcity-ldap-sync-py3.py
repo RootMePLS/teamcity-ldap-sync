@@ -1,10 +1,10 @@
-import ldap3
-from ldap3 import Server, Connection, AUTO_BIND_NO_TLS, SUBTREE, ALL_ATTRIBUTES, ALL, BASE
+from ldap3 import Server, Connection, SUBTREE, ALL, SCHEMA
 from urllib.parse import urlparse
 import requests
 import json
 import configparser
 import argparse
+import atexit
 
 
 def get_args():
@@ -48,12 +48,31 @@ class LDAPConn(object):
 
     """
 
-    def __init__(self, uri, base, user, passwd):
-        # self.uri = uri
-        self.uri = urlparse(uri)
-        self.base = base
-        self.ldap_user = user
-        self.ldap_pass = passwd
+    def __init__(self, args, config):
+        self.uri = urlparse(config.ldap_uri)
+        self.base = config.ldap_base
+        self.ldap_user = config.ldap_user
+        self.ldap_pass = config.ldap_pass
+        self.lowercase = args.lowercase
+        self.skipdisabled = args.skip_disabled
+        self.recursive = args.recursive
+
+        if config.ldap_type == 'activedirectory':
+            self.active_directory = "true"
+            self.group_filter = config.ad_filtergroup
+            self.user_filter = config.ad_filteruser
+            self.disabled_filter = config.ad_filterdisabled
+            self.memberof_filter = config.ad_filtermemberof
+            self.group_member_attribute = config.ad_groupattribute
+            self.uid_attribute = config.ad_userattribute
+
+        else:
+            self.active_directory = None
+            self.openldap_type = config.openldap_type
+            self.group_filter = config.openldap_filtergroup
+            self.user_filter = config.openldap_filteruser
+            self.group_member_attribute = config.openldap_groupattribute
+            self.uid_attribute = config.openldap_userattribute
 
     def connect(self):
         """
@@ -66,7 +85,7 @@ class LDAPConn(object):
 
         server = Server(host=self.uri.hostname,
                         port=self.uri.port,
-                        get_info=ALL)
+                        get_info=SCHEMA)
         self.conn = Connection(server=server,
                                user=self.ldap_user,
                                password=self.ldap_pass,
@@ -74,6 +93,7 @@ class LDAPConn(object):
                                raise_exceptions=True)
 
         self.conn.bind()
+        # atexit.register(Connection, self.conn.unbind())
 
     def disconnect(self):
         """
@@ -93,8 +113,8 @@ class LDAPConn(object):
             A list of all users in the LDAP group
 
         """
-        attrlist = [group_member_attribute]
-        filter = group_filter % group
+        attrlist = [self.group_member_attribute]
+        filter = self.group_filter % group
 
         # result = self.conn.search_s(base=self.base,
         #                             scope=ldap.SCOPE_SUBTREE,
@@ -110,7 +130,7 @@ class LDAPConn(object):
             return None
 
         # Get DN for each user in the group
-        if active_directory:
+        if self.active_directory:
 
             final_listing = {}
 
@@ -121,18 +141,18 @@ class LDAPConn(object):
                 result_attrs = members.get('attributes')
 
             group_members = []
-            attrlist = [uid_attribute]
+            attrlist = [self.uid_attribute]
 
-            if recursive:
+            if self.recursive:
                 # Get a DN for all users in a group (recursive)
                 # It's available only on domain controllers with Windows Server 2003 SP2 or later
 
-                member_of_filter_dn = memberof_filter % result_dn
+                member_of_filter_dn = self.memberof_filter % result_dn
 
-                if skipdisabled:
-                    filter = "(&%s%s%s)" % (user_filter, member_of_filter_dn, disabled_filter)
+                if self.skipdisabled:
+                    filter = "(&%s%s%s)" % (self.user_filter, member_of_filter_dn, self.disabled_filter)
                 else:
-                    filter = "(&%s%s)" % (user_filter, member_of_filter_dn)
+                    filter = "(&%s%s)" % (self.user_filter, member_of_filter_dn)
 
                 uid = self.conn.search(search_base=self.base,
                                        search_scope=SUBTREE,
@@ -145,11 +165,11 @@ class LDAPConn(object):
 
             else:
                 # Otherwise, just get a DN for each user in the group
-                for member in result_attrs[group_member_attribute]:
-                    if skipdisabled:
-                        filter = "(&%s%s)" % (user_filter, disabled_filter)
+                for member in result_attrs[self.group_member_attribute]:
+                    if self.skipdisabled:
+                        filter = "(&%s%s)" % (self.user_filter, self.disabled_filter)
                     else:
-                        filter = "(&%s)" % user_filter
+                        filter = "(&%s)" % self.user_filter
 
                     uid = self.conn.search(search_base=member,
                                            search_scope=SUBTREE,
@@ -165,7 +185,7 @@ class LDAPConn(object):
                 dn = item.get('dn')
                 username = item.get('attributes').get('sAMAccountName')
 
-                if lowercase:
+                if self.lowercase:
                     username = username.lower()
 
                 final_listing[username] = dn
@@ -179,21 +199,21 @@ class LDAPConn(object):
             final_listing = {}
 
             # Get DN for each user in the group
-            for uid in users[group_member_attribute]:
+            for uid in users[self.group_member_attribute]:
 
-                if openldap_type == "groupofnames":
+                if self.openldap_type == "groupofnames":
                     uid = uid.split('=', 2)
                     uid = uid[1].split(',', 1)
                     uid = uid[0]
 
-                filter = user_filter % uid
-                attrlist = [uid_attribute]
+                filter = self.user_filter % uid
+                attrlist = [self.uid_attribute]
 
                 # get the actual LDAP object for each group member
-                user = self.conn.search_s(base=self.base,
-                                          scope=ldap.SCOPE_SUBTREE,
-                                          filterstr=filter,
-                                          attrlist=attrlist)
+                user = self.conn.search(search_base=self.base,
+                                        search_scope=SUBTREE,
+                                        search_filter=filter,
+                                        attributes=attrlist)
 
                 for items in user:
                     final_listing[uid] = items[0]
@@ -203,7 +223,7 @@ class LDAPConn(object):
     def get_groups_with_wildcard(self, groups_wildcard):
         print(">>> Search group with wildcard: %s" % groups_wildcard)
 
-        filter = group_filter % groups_wildcard
+        filter = self.group_filter % groups_wildcard
         result_groups = []
 
         result = self.conn.search(search_base=self.base,
@@ -256,113 +276,42 @@ class TeamCityLDAPConf(object):
     Provides methods for parsing and retrieving config entries
     """
 
-    def __init__(self, config):
-        self.config = config
-
-    def try_get_item(self, parser, section, option, default):
-        """
-        Gets config item
-
-        Args:
-            parser  (configparser): configparser
-            section          (str): Config section name
-            option           (str): Config option name
-            default               : Value to return if item doesn't exist
-
-        Returns:
-            Config item value or default value
-
-        """
-
+    def __init__(self, parser):
         try:
-            result = parser.get(section, option)
-        except (configparser.NoOptionError, configparser.NoSectionError):
-            result = default
+            self.ldap_uri = parser['ldap']['uri']
+            self.ldap_base = parser['ldap']['base']
+            self.ldap_groups = [i.strip() for i in parser['ldap']['groups'].split(',')]
+            self.ldap_user = parser['ldap']['binduser']
+            self.ldap_pass = parser['ldap']['bindpass']
+            self.ad_filtergroup = parser['ad']['filtergroup']
+            self.ad_filteruser = parser['ad']['filteruser']
+            self.ad_filterdisabled = parser['ad']['filterdisabled']
+            self.ad_filtermemberof = parser['ad']['filtermemberof']
+            self.ad_groupattribute = parser['ad']['groupattribute']
+            self.ad_userattribute = parser['ad']['userattribute']
+            self.openldap_type = parser['openldap']['type']
+            self.openldap_filtergroup = parser['openldap']['filtergroup']
+            self.openldap_filteruser = parser['openldap']['filteruser']
+            self.openldap_groupattribute = parser['openldap']['groupattribute']
+            self.openldap_userattribute = parser['openldap']['userattribute']
+            self.tc_server = parser['teamcity']['server']
+            self.tc_username = parser['teamcity']['username']
+            self.tc_password = parser['teamcity']['password']
 
-        return result
+            if parser.has_option('ldap', 'media'):
+                self.ldap_media = parser['ldap']['media']
+            else:
+                self.ldap_media = 'mail'
 
-    def try_get_section(self, parser, section, default):
-        """
-        Gets config section
+            if parser.has_option('ldap', 'type'):
+                self.ldap_type = parser['ldap']['type']
+            else:
+                self.ldap_type = None
 
-        Args:
-            parser  (configparser): configparser
-            section          (str): Config section name
-            default               : Value to return if section doesn't exist
-
-        Returns:
-            Config section dict or default value
-
-        """
-
-        try:
-            result = parser.items(section)
-        except configparser.NoSectionError:
-            result = default
-
-        return result
-
-    def remove_config_section_items(self, section, items):
-        """
-        Removes items from config section
-
-        Args:
-            section     (list of tuples): Config section
-            items                 (list): Item names to remove
-
-        Returns:
-            Config section without specified items
-
-        """
-
-        return [i for i in section if i[0] not in items]
-
-    def load_config(self):
-        """
-        Loads the configuration file
-
-        Raises:
-            configparser.NoOptionError
-
-        """
-        parser = configparser.RawConfigParser()
-        parser.read(self.config, encoding='utf-8')
-
-        try:
-            self.ldap_type = self.try_get_item(parser, 'ldap', 'type', None)
-
-            self.ldap_uri = parser.get('ldap', 'uri')
-            self.ldap_base = parser.get('ldap', 'base')
-
-            self.ldap_groups = [i.strip() for i in parser.get('ldap', 'groups').split(',')]
-
-            self.ldap_user = parser.get('ldap', 'binduser')
-            self.ldap_pass = parser.get('ldap', 'bindpass')
-
-            self.ldap_media = self.try_get_item(parser, 'ldap', 'media', 'mail')
-
-            self.ad_filtergroup = parser.get('ad', 'filtergroup')
-            self.ad_filteruser = parser.get('ad', 'filteruser')
-            self.ad_filterdisabled = parser.get('ad', 'filterdisabled')
-            self.ad_filtermemberof = parser.get('ad', 'filtermemberof')
-            self.ad_groupattribute = parser.get('ad', 'groupattribute')
-            self.ad_userattribute = parser.get('ad', 'userattribute')
-
-            self.openldap_type = parser.get('openldap', 'type')
-            self.openldap_filtergroup = parser.get('openldap', 'filtergroup')
-            self.openldap_filteruser = parser.get('openldap', 'filteruser')
-            self.openldap_groupattribute = parser.get('openldap', 'groupattribute')
-            self.openldap_userattribute = parser.get('openldap', 'userattribute')
-
-            self.tc_server = parser.get('teamcity', 'server')
-            self.tc_username = parser.get('teamcity', 'username')
-            self.tc_password = parser.get('teamcity', 'password')
-
-            self.user_opt = self.try_get_section(parser, 'user', {})
-
-            self.media_description = self.try_get_item(parser, 'media', 'description', 'Email')
-            self.media_opt = self.remove_config_section_items(self.try_get_section(parser, 'media', {}),
-                                                              ('description', 'userid'))
+            if parser.has_option('media', 'description'):
+                self.ldap_media = parser['media']['description']
+            else:
+                self.ldap_media = 'Email'
 
         except configparser.NoOptionError as e:
             raise SystemExit('Configuration issues detected in %s' % self.config)
@@ -385,12 +334,12 @@ class TeamCityLDAPConf(object):
 
 
 class TeamCityClient(object):
-    def __init__(self, tc_url, login, password, ldap_groups, ldap_object):
-        self.rest_url = '{url}/app/rest/'.format(url=tc_url)
+    def __init__(self, config, ldap_object):
+        self.rest_url = '{url}/app/rest/'.format(url=config.tc_server)
         self.ldap_object = ldap_object
-        self.ldap_groups = ldap_groups
+        self.ldap_groups = config.ldap_groups
         self.session = requests.Session()
-        self.session.auth = (login, password)
+        self.session.auth = (config.tc_username, config.tc_password)
         self.session.headers.update({'Content-type': 'application/json', 'Accept': 'application/json'})
         self.tc_groups = TeamCityClient.get_tc_groups(self)
         self.tc_users = TeamCityClient.get_tc_users(self)
@@ -470,7 +419,6 @@ class TeamCityClient(object):
             # Get users from LDAP group
             ldap_group_users = self.ldap_object.get_group_members(group)
 
-
             # Create group if not exists
             tc_groups = [gr['name'] for gr in self.tc_groups]
             if group not in tc_groups:
@@ -506,51 +454,23 @@ def main():
     # Parse CLI arguments
     args = get_args()
 
-    config = TeamCityLDAPConf(args.file)
-    config.load_config()
+    # Create parser object
+    parser = configparser.RawConfigParser()
+    parser.read(args.file, encoding='utf-8')
 
-    # set up AD differences, if necessary
-    global active_directory
-    global openldap_type
-    global group_filter
-    global disabled_filter
-    global user_filter
-    global memberof_filter
-    global group_member_attribute
-    global uid_attribute
-    global lowercase
-    global skipdisabled
-    global deleteorphans
-    global recursive
+    # Create config object
+    config = TeamCityLDAPConf(parser)
 
-    lowercase = args.lowercase
-    skipdisabled = args.skip_disabled
-    recursive = args.recursive
+    # Create LDAP object
+    ldap_conn = LDAPConn(args, config)
 
-    if config.ldap_type == 'activedirectory':
-        active_directory = "true"
-        group_filter = config.ad_filtergroup
-        user_filter = config.ad_filteruser
-        disabled_filter = config.ad_filterdisabled
-        memberof_filter = config.ad_filtermemberof
-        group_member_attribute = config.ad_groupattribute
-        uid_attribute = config.ad_userattribute
-
-    else:
-        active_directory = None
-        openldap_type = config.openldap_type
-        group_filter = config.openldap_filtergroup
-        user_filter = config.openldap_filteruser
-        group_member_attribute = config.openldap_groupattribute
-        uid_attribute = config.openldap_userattribute
-
-    ldap_conn = LDAPConn(config.ldap_uri, config.ldap_base, config.ldap_user, config.ldap_pass)
+    # Connect to LDAP
     ldap_conn.connect()
 
     if args.wildcard_search:
         config.set_groups_with_wildcard(ldap_conn)
 
-    tc = TeamCityClient(config.tc_server, config.tc_username, config.tc_password, config.ldap_groups, ldap_conn)
+    tc = TeamCityClient(config, ldap_conn)
     tc.start_sync()
     print("HOOOORAY Sync complete")
     ldap_conn.disconnect()
