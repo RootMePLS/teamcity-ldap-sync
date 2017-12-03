@@ -1,10 +1,10 @@
-from ldap3 import Server, Connection, SUBTREE, ALL, SCHEMA
-from urllib.parse import urlparse
-import requests
-import json
-import configparser
 import argparse
+import configparser
+import json
+from urllib.parse import urlparse
 
+import requests
+from ldap3 import Server, Connection, SUBTREE, SCHEMA
 
 
 def get_args():
@@ -86,6 +86,7 @@ class LDAPConn(object):
         server = Server(host=self.uri.hostname,
                         port=self.uri.port,
                         get_info=SCHEMA)
+
         self.conn = Connection(server=server,
                                user=self.ldap_user,
                                password=self.ldap_pass,
@@ -115,11 +116,6 @@ class LDAPConn(object):
         """
         attrlist = [self.group_member_attribute]
         filter = self.group_filter % group
-
-        # result = self.conn.search_s(base=self.base,
-        #                             scope=ldap.SCOPE_SUBTREE,
-        #                             filterstr=filter,
-        #                             attrlist=attrlist)
 
         result = self.conn.search(search_base=self.base,
                                   search_scope=SUBTREE,
@@ -244,14 +240,16 @@ class LDAPConn(object):
 
     def get_user_attributes(self, dn, attr_list):
         """
-        Retrieves the 'media' attribute of an LDAP user
+        Retrieves list of attributes of an LDAP user
 
         Args:
-            username (str): The LDAP distinguished name to lookup
-            ldap_media (str): The name of the field containing the media address
+            :param dn: The LDAP distinguished name to lookup
+            :param attr_list: List of attributes to extract
 
         Returns:
             The user's media attribute value
+
+
 
         """
 
@@ -314,7 +312,7 @@ class TeamCityLDAPConf(object):
                 self.ldap_media = 'Email'
 
         except configparser.NoOptionError as e:
-            raise SystemExit('Configuration issues detected in %s' % self.config)
+            raise SystemExit('Configuration issues detected in %s' % e)
 
     def set_groups_with_wildcard(self, ldap_conn):
         """
@@ -397,7 +395,7 @@ class TeamCityClient(object):
         data = json.dumps(user_groups)
         resp = self.session.put(url, data=data, verify=False)
         if resp.status_code != 200:
-            return "Error: Couldn't add user " + user + " to group " + group + '\n' + resp.content
+            return "Error: Couldn't add user " + user + " to group " + group_name + '\n' + resp.content
 
     def create_group(self, group_name):
         url = self.rest_url + 'userGroups'
@@ -406,7 +404,7 @@ class TeamCityClient(object):
 
     def create_user(self, user):
         url = self.rest_url + 'users'
-        if user['email'] == []:
+        if not user['email']:
             user['email'] = ''
         data = json.dumps({u'username': user['username'], u'name': user['name'], u'email': user['email']})
 
@@ -430,10 +428,11 @@ class TeamCityClient(object):
                 if login not in self.tc_users:
                     attr_list = ['sn', 'givenName', 'mail']
                     attributes = self.ldap_object.get_user_attributes(dn, attr_list)
-                    user = {'username': login,
-                            'name': attributes['givenName'] + ' ' +
-                                    attributes['sn'] if attributes['sn'] else login,
-                            'email': attributes.get('mail', '')}
+                    user = {
+                        'username': login,
+                        'name': attributes['givenName'] + ' ' + attributes['sn'] if attributes['sn'] else login,
+                        'email': attributes.get('mail', '')
+                    }
                     TeamCityClient.create_user(self, user)
 
             # Get users from TC group
