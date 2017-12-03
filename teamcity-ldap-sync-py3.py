@@ -138,15 +138,7 @@ class LDAPConnector(object):
             self.group_member_attribute = config.openldap_groupattribute
             self.uid_attribute = config.openldap_userattribute
 
-    def connect(self):
-        """
-        Establish a connection to the LDAP server.
-
-        Raises:
-            SystemExit
-
-        """
-
+    def __enter__(self):
         server = Server(host=self.uri.hostname,
                         port=self.uri.port,
                         get_info=SCHEMA)
@@ -158,14 +150,11 @@ class LDAPConnector(object):
                                raise_exceptions=True)
 
         self.conn.bind()
-        # atexit.register(Connection, self.conn.unbind())
+        return self
 
-    def disconnect(self):
-        """
-        Disconnect from the LDAP server.
-
-        """
+    def __exit__(self, exctype, exception, traceback):
         self.conn.unbind()
+        print('Synchronization complete')
 
     def get_group_members(self, group):
         """
@@ -186,7 +175,7 @@ class LDAPConnector(object):
                                   search_filter=filter,
                                   attributes=attrlist)
         if not result:
-            print('>>> Unable to find group %s, skipping group' % group)
+            print('Unable to find group {}, skipping group'.format(group))
             return None
 
         # Get DN for each user in the group
@@ -281,7 +270,7 @@ class LDAPConnector(object):
             return final_listing
 
     def get_groups_with_wildcard(self, groups_wildcard):
-        print(">>> Search group with wildcard: %s" % groups_wildcard)
+        print("Search group with wildcard: {}".format(groups_wildcard))
 
         filter = self.group_filter % groups_wildcard
         result_groups = []
@@ -298,7 +287,7 @@ class LDAPConnector(object):
                 result_groups.append(group_name)
 
         if not result_groups:
-            print('>>> Unable to find group %s, skipping group wildcard' % groups_wildcard)
+            print('Unable to find group {}, skipping group wildcard'.fromat(groups_wildcard))
 
         return result_groups
 
@@ -474,19 +463,13 @@ def main():
     # Create config object from config file
     config = TeamCityLDAPConfig(parser)
 
-    # Create LDAP connector
-    ldap_conn = LDAPConnector(args, config)
-
     # Connect to LDAP
-    ldap_conn.connect()
+    with LDAPConnector(args, config) as ldap_conn:
+        if args.wildcard_search:
+            config.set_groups_with_wildcard(ldap_conn)
 
-    if args.wildcard_search:
-        config.set_groups_with_wildcard(ldap_conn)
-
-    tc = TeamCityClient(config, ldap_conn)
-    tc.start_sync()
-
-    ldap_conn.disconnect()
+        tc = TeamCityClient(config, ldap_conn)
+        tc.start_sync()
 
 
 if __name__ == '__main__':
