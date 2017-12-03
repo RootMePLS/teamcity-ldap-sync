@@ -4,7 +4,7 @@ import requests
 import json
 import configparser
 import argparse
-import atexit
+
 
 
 def get_args():
@@ -137,8 +137,8 @@ class LDAPConn(object):
             result = json.loads(self.conn.response_to_json())['entries']
 
             for members in result:
-                result_dn = members.get('dn')
-                result_attrs = members.get('attributes')
+                result_dn = members['dn']
+                result_attrs = members['attributes']
 
             group_members = []
             attrlist = [self.uid_attribute]
@@ -182,8 +182,8 @@ class LDAPConn(object):
 
             # Fill dictionary with usernames and corresponding DNs
             for item in group_members:
-                dn = item.get('dn')
-                username = item.get('attributes').get('sAMAccountName')
+                dn = item['dn']
+                username = item['attributes']['sAMAccountName']
 
                 if self.lowercase:
                     username = username.lower()
@@ -234,7 +234,7 @@ class LDAPConn(object):
         if result:
             result = json.loads(self.conn.response_to_json())['entries']
             for group in result:
-                group_name = group['attributes'].get('cn')
+                group_name = group['attributes']['cn']
                 result_groups.append(group_name)
 
         if not result_groups:
