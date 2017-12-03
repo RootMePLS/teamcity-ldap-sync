@@ -1,10 +1,18 @@
 import argparse
-import configparser
 import json
-from urllib.parse import urlparse
-
 import requests
+import random
 from ldap3 import Server, Connection, SUBTREE, SCHEMA
+
+try:
+    from urllib.parse import urlparse
+except ImportError:
+    from urlparse import urlparse
+
+try:
+    import configparser
+except ImportError:
+    import ConfigParser as configparser
 
 
 def get_args():
@@ -40,7 +48,63 @@ def get_args():
     return args
 
 
-class LDAPConn(object):
+class TeamCityLDAPConfig(object):
+    """
+    TeamCity-LDAP configuration class
+    Provides methods for parsing and retrieving config entries
+    """
+
+    def __init__(self, parser):
+        try:
+            if parser.has_section('ldap'):
+                self.ldap_type = parser.get('ldap', 'type')
+                self.ldap_uri = parser.get('ldap', 'uri')
+                self.ldap_base = parser.get('ldap', 'base')
+                self.ldap_user = parser.get('ldap', 'binduser')
+                self.ldap_pass = parser.get('ldap', 'bindpass')
+                self.ldap_groups = [i.strip() for i in parser.get('ldap', 'groups').split(',')]
+
+            if parser.has_section('ad'):
+                self.ad_filtergroup = parser.get('ad', 'filtergroup')
+                self.ad_filteruser = parser.get('ad', 'filteruser')
+                self.ad_filterdisabled = parser.get('ad', 'filterdisabled')
+                self.ad_filtermemberof = parser.get('ad', 'filtermemberof')
+                self.ad_groupattribute = parser.get('ad', 'groupattribute')
+                self.ad_userattribute = parser.get('ad', 'userattribute')
+
+            if parser.has_section('openldap'):
+                self.openldap_type = parser.get('openldap', 'type')
+                self.openldap_filtergroup = parser.get('openldap', 'filtergroup')
+                self.openldap_filteruser = parser.get('openldap', 'filteruser')
+                self.openldap_groupattribute = parser.get('openldap', 'groupattribute')
+                self.openldap_userattribute = parser.get('openldap', 'userattribute')
+
+            if parser.has_section('teamcity'):
+                self.tc_server = parser.get('teamcity', 'server')
+                self.tc_username = parser.get('teamcity', 'username')
+                self.tc_password = parser.get('teamcity', 'password')
+
+        except configparser.NoOptionError as e:
+            raise SystemExit('Configuration issues detected in %s' % e)
+
+    def set_groups_with_wildcard(self, ldap_conn):
+        """
+        Set group from LDAP with wildcard
+        :return:
+        """
+        result_groups = []
+
+        for group in self.ldap_groups:
+            groups = ldap_conn.get_groups_with_wildcard(group)
+            result_groups = result_groups + groups
+
+        if result_groups:
+            self.ldap_groups = result_groups
+        else:
+            raise SystemExit('ERROR - No groups found with wildcard')
+
+
+class LDAPConnector(object):
     """
     LDAP connector class
 
@@ -268,69 +332,6 @@ class LDAPConn(object):
         return result
 
 
-class TeamCityLDAPConf(object):
-    """
-    TeamCity-LDAP configuration class
-    Provides methods for parsing and retrieving config entries
-    """
-
-    def __init__(self, parser):
-        try:
-            self.ldap_uri = parser['ldap']['uri']
-            self.ldap_base = parser['ldap']['base']
-            self.ldap_groups = [i.strip() for i in parser['ldap']['groups'].split(',')]
-            self.ldap_user = parser['ldap']['binduser']
-            self.ldap_pass = parser['ldap']['bindpass']
-            self.ad_filtergroup = parser['ad']['filtergroup']
-            self.ad_filteruser = parser['ad']['filteruser']
-            self.ad_filterdisabled = parser['ad']['filterdisabled']
-            self.ad_filtermemberof = parser['ad']['filtermemberof']
-            self.ad_groupattribute = parser['ad']['groupattribute']
-            self.ad_userattribute = parser['ad']['userattribute']
-            self.openldap_type = parser['openldap']['type']
-            self.openldap_filtergroup = parser['openldap']['filtergroup']
-            self.openldap_filteruser = parser['openldap']['filteruser']
-            self.openldap_groupattribute = parser['openldap']['groupattribute']
-            self.openldap_userattribute = parser['openldap']['userattribute']
-            self.tc_server = parser['teamcity']['server']
-            self.tc_username = parser['teamcity']['username']
-            self.tc_password = parser['teamcity']['password']
-
-            if parser.has_option('ldap', 'media'):
-                self.ldap_media = parser['ldap']['media']
-            else:
-                self.ldap_media = 'mail'
-
-            if parser.has_option('ldap', 'type'):
-                self.ldap_type = parser['ldap']['type']
-            else:
-                self.ldap_type = None
-
-            if parser.has_option('media', 'description'):
-                self.ldap_media = parser['media']['description']
-            else:
-                self.ldap_media = 'Email'
-
-        except configparser.NoOptionError as e:
-            raise SystemExit('Configuration issues detected in %s' % e)
-
-    def set_groups_with_wildcard(self, ldap_conn):
-        """
-        Set group from LDAP with wildcard
-        :return:
-        """
-        result_groups = []
-
-        for group in self.ldap_groups:
-            groups = ldap_conn.get_groups_with_wildcard(group)
-            result_groups = result_groups + groups
-
-        if result_groups:
-            self.ldap_groups = result_groups
-        else:
-            raise SystemExit('ERROR - No groups found with wildcard')
-
-
 class TeamCityClient(object):
     def __init__(self, config, ldap_object):
         self.rest_url = '{url}/app/rest/'.format(url=config.tc_server)
@@ -345,7 +346,7 @@ class TeamCityClient(object):
     def get_tc_groups(self):
         url = self.rest_url + 'userGroups'
         groups_in_tc = self.session.get(url, verify=False).json()
-        return [group for group in groups_in_tc['group'] if '.Zabbix.' in group['name']]
+        return [group for group in groups_in_tc['group']]
 
     def get_tc_users(self):
         url = self.rest_url + 'users'
@@ -358,21 +359,22 @@ class TeamCityClient(object):
         if resp.status_code == 200:
             return resp.json()
         elif resp.status_code != 200:
-            return "Error: Couldn't find user " + user
+            return "Error: Couldn't find user {}\n{}".format(user, resp.content)
 
     def get_users_from_group(self, group_name):
-        if self.tc_groups:
+        if [group['key'] for group in self.tc_groups if group['name'] == group_name]:
             key = [group['key'] for group in self.tc_groups if group['name'] == group_name][0]
             url = self.rest_url + 'userGroups/key:' + key
             resp = self.session.get(url, verify=False)
             if resp.status_code != 200:
-                Exception("Error: Couldn't find group " + group_name + '\n' + resp.content)
+                Exception("Error: Couldn't find group {}\n{}".format(group_name, resp.content))
             users = resp.json()['users']['user']
             return [user['username'] for user in users if users]
         else:
             return []
 
     def add_user_to_group(self, user, group_name):
+        print("Adding user {} to group {}".format(user, group_name))
         url = self.rest_url + 'users/' + user + '/groups'
         user_groups = TeamCityClient.get_user_groups(self, user)
         href = [group['href'] for group in self.tc_groups if group['name'] == group_name][0]
@@ -384,9 +386,10 @@ class TeamCityClient(object):
         data = json.dumps(user_groups)
         resp = self.session.put(url, data=data, verify=False)
         if resp.status_code != 200:
-            return "Error: Couldn't add user " + user + " to group " + group_name + '\n' + resp.content
+            print("Error: Couldn't add user {} to group {}\n{}".format(user, group_name, resp.content))
 
     def remove_user_from_group(self, user, group_name):
+        print("Removing user {} from group {}".format(user, group_name))
         url = self.rest_url + 'users/' + user + '/groups'
         user_groups = TeamCityClient.get_user_groups(self, user)
         for group in user_groups['group']:
@@ -395,33 +398,44 @@ class TeamCityClient(object):
         data = json.dumps(user_groups)
         resp = self.session.put(url, data=data, verify=False)
         if resp.status_code != 200:
-            return "Error: Couldn't add user " + user + " to group " + group_name + '\n' + resp.content
+            print("Error: Couldn't remove user {} from group {}\n{}".format(user, group_name, resp.content))
 
     def create_group(self, group_name):
+        print("Creating group {} in TC".format(group_name))
         url = self.rest_url + 'userGroups'
-        data = json.dumps({"name": group_name, "key": group_name[:16]})
-        self.session.post(url, verify=False, data=data)
+        key = ''.join(random.choice('0123456789ABCDEF') for i in range(16))
+        data = json.dumps({"name": group_name, "key": key})
+        resp = self.session.post(url, verify=False, data=data)
+        if resp.status_code == 200:
+            self.tc_groups = TeamCityClient.get_tc_groups(self)
+        else:
+            print("Error: Couldn't create group {}\n{}".format(group_name, resp.content))
 
     def create_user(self, user):
+        print("Creating user {}".format(user['username']))
         url = self.rest_url + 'users'
         if not user['email']:
             user['email'] = ''
         data = json.dumps({u'username': user['username'], u'name': user['name'], u'email': user['email']})
 
-        self.session.post(url, verify=False, data=data)
+        resp = self.session.post(url, verify=False, data=data)
+        if resp.status_code == 200:
+            self.tc_users = TeamCityClient.get_tc_users(self)
+        else:
+            print("Error: Couldn't create user {}\n{}".format(user['username'], resp.content))
 
     def start_sync(self):
 
-        for group in self.ldap_groups:
+        for ldap_group in self.ldap_groups:
+            print("Syncing group: {}\n{}".format(ldap_group, "=" * 20))
 
             # Get users from LDAP group
-            ldap_group_users = self.ldap_object.get_group_members(group)
+            ldap_group_users = self.ldap_object.get_group_members(ldap_group)
 
             # Create group if not exists
             tc_groups = [gr['name'] for gr in self.tc_groups]
-            if group not in tc_groups:
-                TeamCityClient.create_group(self, group)
-                self.tc_groups = TeamCityClient.get_tc_groups(self)
+            if ldap_group not in tc_groups:
+                TeamCityClient.create_group(self, ldap_group)
 
             # Create users if they not exist
             for login, dn in ldap_group_users.items():
@@ -436,32 +450,32 @@ class TeamCityClient(object):
                     TeamCityClient.create_user(self, user)
 
             # Get users from TC group
-            tc_group_users = TeamCityClient.get_users_from_group(self, group)
+            tc_group_users = TeamCityClient.get_users_from_group(self, ldap_group)
 
             # Add users to TC group
             for user in ldap_group_users.keys():
                 if user not in tc_group_users:
-                    TeamCityClient.add_user_to_group(self, user, group)
+                    TeamCityClient.add_user_to_group(self, user, ldap_group)
 
             # Remove users from TC group
             for user in tc_group_users:
                 if user not in ldap_group_users.keys():
-                    TeamCityClient.remove_user_from_group(self, user, group)
+                    TeamCityClient.remove_user_from_group(self, user, ldap_group)
 
 
 def main():
     # Parse CLI arguments
     args = get_args()
 
-    # Create parser object
+    # Read config file
     parser = configparser.RawConfigParser()
-    parser.read(args.file, encoding='utf-8')
+    parser.read(args.file)
 
-    # Create config object
-    config = TeamCityLDAPConf(parser)
+    # Create config object from config file
+    config = TeamCityLDAPConfig(parser)
 
-    # Create LDAP object
-    ldap_conn = LDAPConn(args, config)
+    # Create LDAP connector
+    ldap_conn = LDAPConnector(args, config)
 
     # Connect to LDAP
     ldap_conn.connect()
@@ -471,7 +485,7 @@ def main():
 
     tc = TeamCityClient(config, ldap_conn)
     tc.start_sync()
-    print("HOOOORAY Sync complete")
+
     ldap_conn.disconnect()
 
 
