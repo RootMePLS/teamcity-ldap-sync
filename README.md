@@ -3,12 +3,12 @@
 The *teamcity-ldap-sync* script is used for one side sync of existing LDAP groups and users into Teamcity.
 Idea taken [zabbix-ldap-sync](https://github.com/dnaeon/zabbix-ldap-sync)
 
-#####Tested on:
+##### Tested on:
 - Linux 4.14.3-1
 - Python 2.7.14 and Python 3.6.3
 - ldap3==2.4 and requests==2.18.4
 
-#####For test and development:
+##### For test and development:
 - ссылка на docker-compose файл
 
 ## Requirements
@@ -32,7 +32,7 @@ Teamcity user should have System Administrator role.
 * `bindpass` - Password for LDAP user
 * `groups` - LDAP groups to sync with Zabbix (support wildcard - TESTED ONLY with Active Directory, see Command-line arguments)
 
-####[ad]
+#### [ad]
 * `filtergroup` = The ldap filter to get group in ActiveDirectory mode, by default `(&(objectClass=group)(name=%s))`
 * `filteruser` = The ldap filter to get the users in ActiveDirectory mode, by default `(objectClass=user)(objectCategory=Person)`
 * `filterdisabled` = The filter to get the disabled user in ActiveDirectory mode, by default `(!(userAccountControl:1.2.840.113556.1.4.803:=2))`
@@ -40,7 +40,7 @@ Teamcity user should have System Administrator role.
 * `groupattribute` = The attribute used for membership in a group in ActiveDirectory mode, by default `member`
 * `userattribute` = The attribute for users in ActiveDirectory mode `sAMAccountName`
 
-####[openldap]
+#### [openldap]
 * `type` = The storage mode for group and users can be `posix` or `groupofnames` 
 * `filtergroup` = The ldap filter to get group in OpenLDAP mode, by default `(&(objectClass=posixGroup)(cn=%s))`
 * `filteruser` = The ldap filter to get the users in OpenLDAP mode, by default `(&(objectClass=posixAccount)(uid=%s))`
