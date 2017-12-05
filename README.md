@@ -4,9 +4,9 @@ The *teamcity-ldap-sync* script is used for one side sync of existing LDAP group
 Idea taken [zabbix-ldap-sync](https://github.com/dnaeon/zabbix-ldap-sync)
 
 ##### Tested on:
-- Linux 4.14.3-1
-- Python 2.7.12, 2.7.14 and Python 3.6.3
-- ldap3==2.4 and requests==2.18.4
+* Linux 4.14.3-1
+* Python 2.7.12, 2.7.14 and Python 3.6.3
+* ldap3==2.4 and requests==2.18.4
 
 ##### For test and development:
 Copy-paste to your shell
@@ -114,7 +114,7 @@ You would generally be running the above scripts on regular basis, say each day 
 
 
 ## TODO:
-1) https connection
-2) ldaps connection
-3) Fix issue with Python 3.5.2 and 3.5.4
-4) Check if the config is specified wildcard in group name and does not have -w parameter - drop exception
+* https connection
+* ldaps connection
+* Fix issue with Python 3.5.2 and 3.5.4
+* Check if the config is specified wildcard in group name and does not have -w parameter - drop exception
