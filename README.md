@@ -5,11 +5,20 @@ Idea taken [zabbix-ldap-sync](https://github.com/dnaeon/zabbix-ldap-sync)
 
 ##### Tested on:
 - Linux 4.14.3-1
-- Python 2.7.14 and Python 3.6.3
+- Python 2.7.12, 2.7.14 and Python 3.6.3
 - ldap3==2.4 and requests==2.18.4
 
 ##### For test and development:
-- ссылка на docker-compose файл
+Copy-paste to your shell
+```bash
+cd && mkdir teamcity-test-srv && \
+docker run -it --name teamcity-server \
+-v $HOME/teamcity-test-srv/:/data/teamcity_server/datadir \
+-v $HOME/teamcity-test-srv/:/opt/teamcity/logs      \
+-p 80:8111     \
+jetbrains/teamcity-server:10.0.4
+```
+Open browser, configure teamcity, paste user credential to teamcity-ldap.conf, test it.
 
 ## Requirements
 
@@ -41,7 +50,7 @@ Teamcity user should have System Administrator role.
 * `userattribute` = The attribute for users in ActiveDirectory mode `sAMAccountName`
 
 #### [openldap]
-* `type` = The storage mode for group and users can be `posix` or `groupofnames` 
+* `type` = The storage mode for group and users can be `posix` or `groupofnames`
 * `filtergroup` = The ldap filter to get group in OpenLDAP mode, by default `(&(objectClass=posixGroup)(cn=%s))`
 * `filteruser` = The ldap filter to get the users in OpenLDAP mode, by default `(&(objectClass=posixAccount)(uid=%s))`
 * `groupattribute` = The attribute used for membership in a group in OpenLDAP mode, by default `memberUid`
@@ -49,7 +58,7 @@ Teamcity user should have System Administrator role.
 
 #### [teamcity]
 * `server` - Teamcity URL
-* `username` - Teamcity username. 
+* `username` - Teamcity username.
 * `password` - Teamcity user password
 
 ## Configuration file example
@@ -57,11 +66,11 @@ Teamcity user should have System Administrator role.
     [ldap]
     type = activedirectory
     uri = ldap://company.com:389/
-    base = dc=ptsecurity,dc=ru
+    base = dc=company,dc=com
     binduser = domain_login
     bindpass = domain_password
     groups = R.*.Teamcity.*
-    
+
     [ad]
     filtergroup = (&(objectClass=group)(name=%s))
     filteruser = (objectClass=user)(objectCategory=Person)
@@ -69,16 +78,16 @@ Teamcity user should have System Administrator role.
     filtermemberof = (memberOf:1.2.840.113556.1.4.1941:=%s)
     groupattribute = member
     userattribute = sAMAccountName
-    
+
     [openldap]
     type = posix
     filtergroup = (&(objectClass=posixGroup)(cn=%s))
     filteruser = (&(objectClass=posixAccount)(uid=%s))
     groupattribute = memberUid
     userattribute = uid
-    
+
     [teamcity]
-    server = teamcity.company.com
+    server = http://localhost
     username = teamcity_user_login
     password = teamcity_user_password
 
@@ -90,7 +99,6 @@ Teamcity user should have System Administrator role.
 
     Options:
       -h, --help                    Display this usage info
-      -l, --lowercase               Create AD user names as lowercase
       -s, --skip-disabled           Skip disabled AD users
       -r, --recursive               Resolves AD group members recursively (i.e. nested groups)
       -w, --wildcard-search         Search AD group with wildcard (e.g. R.*.Teamcity.*) - TESTED ONLY with Active Directory

@@ -2,7 +2,7 @@ import argparse
 import json
 import requests
 import random
-from ldap3 import Server, Connection, SUBTREE, SCHEMA
+from ldap3 import Server, Connection, SUBTREE, ALL
 
 try:
     from urllib.parse import urlparse
@@ -16,6 +16,7 @@ except ImportError:
 
 
 def get_args():
+
     def _usage():
         return """
     Usage: teamcity-ldap-sync [-lsrwdn] -f <config>
@@ -23,7 +24,6 @@ def get_args():
 
     Options:
       -h, --help                    Display this usage info
-      -l, --lowercase               Create AD user names as lowercase
       -s, --skip-disabled           Skip disabled AD users
       -r, --recursive               Resolves AD group members recursively (i.e. nested groups)
       -w, --wildcard-search         Search AD group with wildcard (e.g. R.*.Teamcity.*) - TESTED ONLY with Active Directory
@@ -156,7 +156,7 @@ class LDAPConnector(object):
     def __enter__(self):
         server = Server(host=self.uri.hostname,
                         port=self.uri.port,
-                        get_info=SCHEMA)
+                        get_info=ALL)
 
         self.conn = Connection(server=server,
                                user=self.ldap_user,
@@ -249,10 +249,7 @@ class LDAPConnector(object):
                 dn = item['dn']
                 username = item['attributes']['sAMAccountName']
 
-                if self.lowercase:
-                    username = username.lower()
-
-                final_listing[username] = dn
+                final_listing[username.lower()] = dn
 
             return final_listing
 
