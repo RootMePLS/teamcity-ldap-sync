@@ -104,7 +104,7 @@ Teamcity user should have System Administrator role.
       -w, --wildcard-search         Search AD group with wildcard (e.g. R.*.Teamcity.*) - TESTED ONLY with Active Directory
       -f <config>, --file <config>  Configuration file to use
 
-## Importing LDAP users into Zabbix
+## Importing LDAP users into Teamcity
 
 Now that we have the above mentioned configuration file created, let's import our groups and users from LDAP to Teamcity.
 
