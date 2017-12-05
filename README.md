@@ -39,7 +39,7 @@ Teamcity user should have System Administrator role.
 * `base` - Base `Distinguished Name`
 * `binduser` - LDAP user which has permissions to perform LDAP search
 * `bindpass` - Password for LDAP user
-* `groups` - LDAP groups to sync with Zabbix (support wildcard - TESTED ONLY with Active Directory, see Command-line arguments)
+* `groups` - LDAP groups to sync with Teamcity (support wildcard - TESTED ONLY with Active Directory, see Command-line arguments)
 
 #### [ad]
 * `filtergroup` = The ldap filter to get group in ActiveDirectory mode, by default `(&(objectClass=group)(name=%s))`
