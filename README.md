@@ -113,7 +113,7 @@ Now that we have the above mentioned configuration file created, let's import ou
 You would generally be running the above scripts on regular basis, say each day from `cron(8)` in order to make sure your Teamcity is in sync with LDAP.
 
 
-TODO:
+## TODO:
 1) https connection
 2) ldaps connection
 3) Fix issue with Python 3.5.2 and 3.5.4
