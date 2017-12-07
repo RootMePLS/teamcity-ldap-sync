@@ -114,7 +114,5 @@ You would generally be running the above scripts on regular basis, say each day 
 
 
 ## TODO:
-* https connection
 * ldaps connection
-* Fix issue with Python 3.5.2 and 3.5.4
 * Check if the config is specified wildcard in group name and does not have -w parameter - drop exception
