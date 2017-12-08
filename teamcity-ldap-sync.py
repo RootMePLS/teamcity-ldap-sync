@@ -299,7 +299,7 @@ class LDAPConnector(object):
                 result_groups.append(group_name)
 
         if not result_groups:
-            print('Unable to find group {}, skipping group wildcard'.fromat(groups_wildcard))
+            print('Unable to find group {}, skipping group wildcard'.format(groups_wildcard))
 
         return result_groups
 
