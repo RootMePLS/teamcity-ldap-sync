@@ -18,7 +18,7 @@ except ImportError:
 def get_args():
     def _usage():
         return """
-    Usage: teamcity-ldap-sync [-lsrwdn] -f <config>
+    Usage: teamcity-ldap-sync [-sr] -f <config>
            teamcity-ldap-sync -h
 
     Options:
