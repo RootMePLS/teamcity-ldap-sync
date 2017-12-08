@@ -349,7 +349,9 @@ class TeamCityClient(object):
         self.session = requests.Session()
         self.session.auth = (config.tc_username, config.tc_password)
         self.session.headers.update({'Content-type': 'application/json', 'Accept': 'application/json'})
-        self.session.verify = config.tc_verify_certificate
+        #self.session.verify = config.tc_verify_certificate
+        if config.tc_verify_certificate:
+            urllib3.disable_warnings()
         self.tc_groups = TeamCityClient.get_tc_groups(self)
         self.tc_users = TeamCityClient.get_tc_users(self)
 
