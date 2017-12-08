@@ -16,7 +16,6 @@ except ImportError:
 
 
 def get_args():
-
     def _usage():
         return """
     Usage: teamcity-ldap-sync [-lsrwdn] -f <config>
@@ -26,7 +25,6 @@ def get_args():
       -h, --help                    Display this usage info
       -s, --skip-disabled           Skip disabled AD users
       -r, --recursive               Resolves AD group members recursively (i.e. nested groups)
-      -w, --wildcard-search         Search AD group with wildcard (e.g. R.*.Teamcity.*) - TESTED ONLY with Active Directory
       -f <config>, --file <config>  Configuration file to use
 
     """
@@ -37,11 +35,6 @@ def get_args():
     parser.add_argument("-f", "--file",
                         required=True,
                         help="Configuration file to use")
-
-    parser.add_argument("-w", "--wildcard-search",
-                        required=False,
-                        action='store_true',
-                        help="Search AD group with wildcard (e.g. R.*.Teamcity.*) - TESTED ONLY with Active Directory")
 
     parser.add_argument("-r", "--recursive",
                         required=False,
@@ -78,6 +71,7 @@ class TeamCityLDAPConfig(object):
                 self.ldap_user = parser.get('ldap', 'binduser')
                 self.ldap_pass = parser.get('ldap', 'bindpass')
                 self.ldap_groups = [i.strip() for i in parser.get('ldap', 'groups').split(',')]
+                self.ldap_wildcard = any('*' in group for group in self.ldap_groups)
 
             if parser.has_section('ad'):
                 self.ad_filtergroup = parser.get('ad', 'filtergroup')
@@ -98,6 +92,7 @@ class TeamCityLDAPConfig(object):
                 self.tc_server = parser.get('teamcity', 'server')
                 self.tc_username = parser.get('teamcity', 'username')
                 self.tc_password = parser.get('teamcity', 'password')
+                self.tc_verify_certificate = parser.get('teamcity', 'verify_certificate')
 
         except configparser.NoOptionError as e:
             raise SystemExit('Configuration issues detected in %s' % e)
@@ -170,6 +165,19 @@ class LDAPConnector(object):
     def __exit__(self, exctype, exception, traceback):
         self.conn.unbind()
         print('Synchronization complete')
+
+    def group_exist(self, group):
+        filter = self.group_filter % group
+
+        self.conn.search(search_base=self.base,
+                         search_filter=filter,
+                         search_scope=SUBTREE,
+                         attributes=['sn'])
+
+        if self.conn.entries:
+            return True
+        else:
+            return False
 
     def get_group_members(self, group):
         """
@@ -341,6 +349,7 @@ class TeamCityClient(object):
         self.session = requests.Session()
         self.session.auth = (config.tc_username, config.tc_password)
         self.session.headers.update({'Content-type': 'application/json', 'Accept': 'application/json'})
+        self.session.verify = config.tc_verify_certificate
         self.tc_groups = TeamCityClient.get_tc_groups(self)
         self.tc_users = TeamCityClient.get_tc_users(self)
 
@@ -428,40 +437,46 @@ class TeamCityClient(object):
     def start_sync(self):
 
         for ldap_group in self.ldap_groups:
-            print("Syncing group: {}\n{}".format(ldap_group, "=" * 20))
 
-            # Get users from LDAP group
-            ldap_group_users = self.ldap_object.get_group_members(ldap_group)
+            if self.ldap_object.group_exist(ldap_group):
 
-            # Create group if not exists
-            tc_groups = [gr['name'] for gr in self.tc_groups]
-            if ldap_group not in tc_groups:
-                TeamCityClient.create_group(self, ldap_group)
+                print("Syncing group: {}\n{}".format(ldap_group, "=" * 20))
 
-            # Create users if they not exist
-            for login, dn in ldap_group_users.items():
-                if login not in self.tc_users:
-                    attr_list = ['sn', 'givenName', 'mail']
-                    attributes = self.ldap_object.get_user_attributes(dn, attr_list)
-                    user = {
-                        'username': login,
-                        'name': attributes['givenName'] + ' ' + attributes['sn'] if attributes['sn'] else login,
-                        'email': attributes.get('mail', '')
-                    }
-                    TeamCityClient.create_user(self, user)
+                # Get users from LDAP group
+                ldap_group_users = self.ldap_object.get_group_members(ldap_group)
 
-            # Get users from TC group
-            tc_group_users = TeamCityClient.get_users_from_group(self, ldap_group)
+                # Create group if not exists
+                tc_groups = [gr['name'] for gr in self.tc_groups]
+                if ldap_group not in tc_groups:
+                    TeamCityClient.create_group(self, ldap_group)
 
-            # Add users to TC group
-            for user in ldap_group_users.keys():
-                if user not in tc_group_users:
-                    TeamCityClient.add_user_to_group(self, user, ldap_group)
+                # Create users if they not exist
+                for login, dn in ldap_group_users.items():
+                    if login not in self.tc_users:
+                        attr_list = ['sn', 'givenName', 'mail']
+                        attributes = self.ldap_object.get_user_attributes(dn, attr_list)
+                        user = {
+                            'username': login,
+                            'name': attributes['givenName'] + ' ' + attributes['sn'] if attributes['sn'] else login,
+                            'email': attributes.get('mail', '')
+                        }
+                        TeamCityClient.create_user(self, user)
 
-            # Remove users from TC group
-            for user in tc_group_users:
-                if user not in ldap_group_users.keys():
-                    TeamCityClient.remove_user_from_group(self, user, ldap_group)
+                # Get users from TC group
+                tc_group_users = TeamCityClient.get_users_from_group(self, ldap_group)
+
+                # Add users to TC group
+                for user in ldap_group_users.keys():
+                    if user not in tc_group_users:
+                        TeamCityClient.add_user_to_group(self, user, ldap_group)
+
+                # Remove users from TC group
+                for user in tc_group_users:
+                    if user not in ldap_group_users.keys():
+                        TeamCityClient.remove_user_from_group(self, user, ldap_group)
+
+            else:
+                print("Couldnt find group {}".format(ldap_group))
 
 
 def main():
@@ -477,7 +492,7 @@ def main():
 
     # Connect to LDAP
     with LDAPConnector(args, config) as ldap_conn:
-        if args.wildcard_search:
+        if config.ldap_wildcard:
             config.set_groups_with_wildcard(ldap_conn)
 
         tc = TeamCityClient(config, ldap_conn)

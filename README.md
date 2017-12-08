@@ -60,6 +60,7 @@ Teamcity user should have System Administrator role.
 * `server` - Teamcity URL
 * `username` - Teamcity username.
 * `password` - Teamcity user password
+* `verify_certificate` - Don't check Teamcity certificate
 
 ## Configuration file example
 
@@ -90,18 +91,18 @@ Teamcity user should have System Administrator role.
     server = http://localhost
     username = teamcity_user_login
     password = teamcity_user_password
+    verify_certificate = False
 
 
 ## Command-line arguments
 
-    Usage: teamcity-ldap-sync [-lsrwdn] -f <config>
+    Usage: teamcity-ldap-sync [-sr] -f <config>
            teamcity-ldap-sync -h
 
     Options:
       -h, --help                    Display this usage info
       -s, --skip-disabled           Skip disabled AD users
       -r, --recursive               Resolves AD group members recursively (i.e. nested groups)
-      -w, --wildcard-search         Search AD group with wildcard (e.g. R.*.Teamcity.*) - TESTED ONLY with Active Directory
       -f <config>, --file <config>  Configuration file to use
 
 ## Importing LDAP users into Teamcity
@@ -115,4 +116,3 @@ You would generally be running the above scripts on regular basis, say each day 
 
 ## TODO:
 * ldaps connection
-* Check if the config is specified wildcard in group name and does not have -w parameter - drop exception
