@@ -92,7 +92,6 @@ class TeamCityLDAPConfig(object):
                 self.tc_server = parser.get('teamcity', 'server')
                 self.tc_username = parser.get('teamcity', 'username')
                 self.tc_password = parser.get('teamcity', 'password')
-                self.tc_verify_certificate = parser.get('teamcity', 'verify_certificate')
 
         except configparser.NoOptionError as e:
             raise SystemExit('Configuration issues detected in %s' % e)
@@ -349,7 +348,6 @@ class TeamCityClient(object):
         self.session = requests.Session()
         self.session.auth = (config.tc_username, config.tc_password)
         self.session.headers.update({'Content-type': 'application/json', 'Accept': 'application/json'})
-        self.session.verify = config.tc_verify_certificate
         self.tc_groups = TeamCityClient.get_tc_groups(self)
         self.tc_users = TeamCityClient.get_tc_users(self)
 

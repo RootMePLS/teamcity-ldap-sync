@@ -60,7 +60,7 @@ Teamcity user should have System Administrator role.
 * `server` - Teamcity URL
 * `username` - Teamcity username.
 * `password` - Teamcity user password
-* `verify_certificate` - Don't check Teamcity certificate
+
 
 ## Configuration file example
 
@@ -91,7 +91,6 @@ Teamcity user should have System Administrator role.
     server = http://localhost
     username = teamcity_user_login
     password = teamcity_user_password
-    verify_certificate = False
 
 
 ## Command-line arguments
