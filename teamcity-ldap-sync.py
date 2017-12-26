@@ -2,7 +2,7 @@ import argparse
 import json
 import requests
 import random
-from ldap3 import Server, Connection, SUBTREE, ALL
+from ldap3 import Server, Connection, SUBTREE, ALL, AUTO_BIND_NO_TLS
 
 try:
     from urllib.parse import urlparse
@@ -150,15 +150,17 @@ class LDAPConnector(object):
     def __enter__(self):
         server = Server(host=self.uri.hostname,
                         port=self.uri.port,
-                        get_info=ALL)
+                        get_info=ALL,
+                        use_ssl=True if self.uri.port == 636 else False)
 
         self.conn = Connection(server=server,
                                user=self.ldap_user,
                                password=self.ldap_pass,
+                               auto_bind=AUTO_BIND_NO_TLS,
+                               read_only=True,
                                check_names=True,
                                raise_exceptions=True)
 
-        self.conn.bind()
         return self
 
     def __exit__(self, exctype, exception, traceback):

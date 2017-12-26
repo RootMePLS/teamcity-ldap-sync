@@ -66,7 +66,7 @@ Teamcity user should have System Administrator role.
 
     [ldap]
     type = activedirectory
-    uri = ldap://company.com:389/
+    uri = ldaps://company.com:636/
     base = dc=company,dc=com
     binduser = domain_login
     bindpass = domain_password
@@ -88,7 +88,7 @@ Teamcity user should have System Administrator role.
     userattribute = uid
 
     [teamcity]
-    server = http://localhost
+    server = https://teamcity.company.com
     username = teamcity_user_login
     password = teamcity_user_password
 
@@ -111,7 +111,3 @@ Now that we have the above mentioned configuration file created, let's import ou
 	$ teamcity-ldap-sync -f /path/to/teamcity-ldap.conf
 
 You would generally be running the above scripts on regular basis, say each day from `cron(8)` in order to make sure your Teamcity is in sync with LDAP.
-
-
-## TODO:
-* ldaps connection
